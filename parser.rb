@@ -95,12 +95,11 @@ class Lexer
 						@cur+=1
 					end
 					if @source[@lineno][@cur].nil? # maybe use better end-of-input handling?
-						raise "End of string (') expected at line %d" % @lineno
+						raise "End of string (') expected at line %d" % (@lineno + 1)
 					end
 				end
 				t::type = 'string'
 				t::value = @source[@lineno][@tok_start..@cur]
-				return t
 		end
 		t::type = 'operator' if t::value && !(t::type) # Maybe write a better check for operators
 		raise 'Unknown token: ' + @source[@lineno][@cur] if t::type.nil?
@@ -152,6 +151,7 @@ end
 
 class Parser
 	@@symtab = {} # Contains all the valid language tokens.  I'm not entirely sure about declaring it a class var
+	attr_accessor :node, :sav #done to get parentheses working.  Fix later
 	def initialize
 		@tokenizer = Lexer.new # why the defined method is initialize and the called method is new mystifies me
 		@token = nil
@@ -197,17 +197,48 @@ class Parser
 		sym
 	end
 	
+	def self.infixr(id, bp=0, &led)
+		sym = symbol(id, bp)
+		if led
+			sym::led = led
+		else
+			sym::led = Proc.new do |node, left|
+				node::left = left
+				node::right = $p.expression bp-1
+				node
+			end
+		end
+		sym
+	end
+	
 	symbol(';')
+	prefix('+', 10)
+	prefix('-', 10)
 	prefix('!', 70)
 	prefix('(', 80) do |node|
 		node = $p.expression 0
+#		$p::sav = $p::node
 		$p.expect ')'
 		node
 	end
 	symbol(')')
-	#infix('=', 10) = should be right-associative
-	infix('&', 30)# Jump because of missing ?:
-	infix('|', 30)
+	infixr('=', 10) do |node, left|
+		raise 'Left side of \'=\' not an lvalue' if left::id != 'name'
+		node::left = left
+		node::right = $p.expression 9
+		node
+	end
+	infix('?', 20) do |node, left|
+		node::left = left
+		middle = $p.expression 20
+		$p.expect ':'
+		node::right = @@symtab[':'].clone
+		node::right::led.call(node::right, middle)
+		node
+	end
+	infix(':', 20)
+	infixr('&', 30)
+	infixr('|', 30)
 	infix('<', 40)
 	infix('<=', 40)
 	infix('==', 40)
@@ -219,22 +250,21 @@ class Parser
 	infix('*', 60)
 	infix('/', 60)
 	infix('%', 60)
-	prefix('+', 10)
-	prefix('-', 10)
 	# symbol('*', 20)::led = Proc.new do |node, left|
 		# node::left = left
 		# node::right = $p.expression 20
 		# node
 	# end
 	symbol('literal')::nud = Proc.new do |node|
-		#self::left ||= left
-		#return self
-		#return p.instance_variable_get :@sav #A hack, for these block defs apparently don't refer to their receiver as 'self'
 		node
 	end
-	symbol('end')::nud = Proc.new do |node| #doesn't seem right
-		#self::left ||= left
-		#return p.instance_variable_get :@sav
+	symbol('string')::nud = Proc.new do |node|
+		node
+	end
+	symbol('name')::nud = Proc.new do |node|
+		node
+	end
+	symbol('end')::nud = Proc.new do |node|
 		node
 	end
 	
@@ -256,8 +286,9 @@ class Parser
 	
 	def expect(expected=nil)
 		if expected
-			if @node::id != expected #doesn't actually get new token.  Fix later
-				raise SyntaxError, "%s expected, but %s received instead" % [expected, (@node ? ("symbol " + @node.id) : "nothing")]
+			if @node::id != expected #doesn't actually get new token properly.  Fix later
+				expect
+				raise SyntaxError, "%s expected, but %s received instead" % [expected, (@node ? ("symbol " + @node.id) : "nothing")] if @node::id != expected
 			end
 		end
 		@token = @tokenizer.get_token
@@ -267,12 +298,21 @@ class Parser
 			when 'number'
 				nextnode = @@symtab['literal'].clone
 				nextnode::left = @token::value
+			when 'string'
+				nextnode = @@symtab['literal'].clone
+				nextnode::left = @token::value
+			when 'name'
+				nextnode = @@symtab['name'].clone
+				nextnode::left = @token::value
+			when 'func'
+				nextnode = @@symtab['func'].clone
+				nextnode::left = @token::value
 			when 'end'
 				nextnode = @@symtab['end'].clone
 		end
-		if @sav == @node #When we need to get a new token/node, which is most of the time
+#		if @sav == @node #When we need to get a new token/node, which is most of the time
 			@node = nextnode
-		end
+#		end
 #		if expected	#caused trouble with the ';'
 #			if nextnode::id != expected
 #				raise SyntaxError, "%s expected, but %s received instead" % [expected, (nextnode ? ("symbol " + nextnode.id) : "nothing")]
@@ -300,14 +340,14 @@ class Parser
 		tree
 	end
 	
-	def parse()
+	def parse
 		line = ''
 		until ((line = gets.chomp) == 'q')
 			@tokenizer::source << line
 			begin
-				puts statement.to_s
+				puts statement.to_s unless line == ''
 			rescue Exception => error
-				p error
+				puts error.to_s + (', at line %d' % (@tokenizer::lineno + 1))
 			ensure
 				@tokenizer::lineno+=1
 				@tokenizer::tok_start = @tokenizer::cur = 0
