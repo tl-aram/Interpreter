@@ -1,4 +1,4 @@
-# Lexer/parser for language
+# Lexer/parser for language DEBUGGING REQUIRED
 # Operators: = + - (unary and n-ary) * / % & | ! (last 3 are logical) == != (inequality) < <= > >= ?:
 # Statements end with ;
 # While loop: var[code] means while(var){code}
@@ -211,6 +211,8 @@ class Parser
 		sym
 	end
 	
+	symbol('{')
+	symbol('}')
 	symbol(';')
 	prefix('+', 10)
 	prefix('-', 10)
@@ -297,7 +299,7 @@ class Parser
 				nextnode = @@symtab[@token::value].clone #probably not the best way to do, maybe use metaprogramming
 			when 'number'
 				nextnode = @@symtab['literal'].clone
-				nextnode::left = @token::value
+				nextnode::left = @token::value.to_i
 			when 'string'
 				nextnode = @@symtab['literal'].clone
 				nextnode::left = @token::value
@@ -340,12 +342,28 @@ class Parser
 		tree
 	end
 	
-	def parse
-		line = ''
-		until ((line = gets.chomp) == 'q')
+	def block
+		raise '{ expected' unless @tokenizer::source[@tokenizer::lineno] == '{'
+		@tokenizer::lineno+=1
+		stmts = [ ]
+		until @tokenizer::source[@tokenizer::lineno] == '}'
+			stmts << statement
+			@tokenizer::lineno+=1
+		end
+		@tokenizer::lineno+=1
+		stmts
+	end
+	
+	def parse(source) #Parses the text input and returns an array of parse trees, one for each statement
+		treearray = [ ]
+		source.each do |line|
 			@tokenizer::source << line
 			begin
-				puts statement.to_s unless line == ''
+				if line == '{'
+					treearray = block
+				elsif line != ''
+					treearray << statement
+				end
 			rescue Exception => error
 				puts error.to_s + (', at line %d' % (@tokenizer::lineno + 1))
 			ensure
@@ -354,10 +372,6 @@ class Parser
 				@sav = @node = nil #to clear the state for the next line
 			end
 		end
+		treearray
 	end
 end
-
-#Temporarily moved symbol declarations out of Parser class
-
-$p = Parser.new
-$p.parse
