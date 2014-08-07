@@ -151,10 +151,15 @@ end
 
 class Parser
 	@@symtab = {} # Contains all the valid language tokens.  I'm not entirely sure about declaring it a class var
+	def self.symtab
+			@@symtab
+	end
+
 	attr_accessor :node, :sav #done to get parentheses working.  Fix later
 	def initialize
 		@tokenizer = Lexer.new # why the defined method is initialize and the called method is new mystifies me
 		@token = nil
+		@blocklevel = 0
 		@node = nil
 		@sav = nil
 	end
@@ -176,7 +181,7 @@ class Parser
 			sym::nud = nud
 		else
 			sym::nud = Proc.new do |node|
-				node::left = $p.expression bp
+				node::left = $i::parser.expression bp
 				node
 			end
 		end
@@ -190,7 +195,7 @@ class Parser
 		else
 			sym::led = Proc.new do |node, left|
 				node::left = left
-				node::right = $p.expression bp
+				node::right = $i::parser.expression bp
 				node
 			end
 		end
@@ -204,7 +209,7 @@ class Parser
 		else
 			sym::led = Proc.new do |node, left|
 				node::left = left
-				node::right = $p.expression bp-1
+				node::right = $i::parser.expression bp-1
 				node
 			end
 		end
@@ -218,22 +223,22 @@ class Parser
 	prefix('-', 10)
 	prefix('!', 70)
 	prefix('(', 80) do |node|
-		node = $p.expression 0
-#		$p::sav = $p::node
-		$p.expect ')'
+		node = $i::parser.expression 0
+#		$i::parser::sav = $i::parser::node
+		$i::parser.expect ')'
 		node
 	end
 	symbol(')')
 	infixr('=', 10) do |node, left|
 		raise 'Left side of \'=\' not an lvalue' if left::id != 'name'
 		node::left = left
-		node::right = $p.expression 9
+		node::right = $i::parser.expression 9
 		node
 	end
 	infix('?', 20) do |node, left|
 		node::left = left
-		middle = $p.expression 20
-		$p.expect ':'
+		middle = $i::parser.expression 20
+		$i::parser.expect ':'
 		node::right = @@symtab[':'].clone
 		node::right::led.call(node::right, middle)
 		node
@@ -254,7 +259,7 @@ class Parser
 	infix('%', 60)
 	# symbol('*', 20)::led = Proc.new do |node, left|
 		# node::left = left
-		# node::right = $p.expression 20
+		# node::right = $i::parser.expression 20
 		# node
 	# end
 	symbol('literal')::nud = Proc.new do |node|
@@ -342,36 +347,36 @@ class Parser
 		tree
 	end
 	
-	def block
-		raise '{ expected' unless @tokenizer::source[@tokenizer::lineno] == '{'
-		@tokenizer::lineno+=1
-		stmts = [ ]
-		until @tokenizer::source[@tokenizer::lineno] == '}'
-			stmts << statement
-			@tokenizer::lineno+=1
-		end
-		@tokenizer::lineno+=1
-		stmts
-	end
-	
-	def parse(source) #Parses the text input and returns an array of parse trees, one for each statement
-		treearray = [ ]
-		source.each do |line|
-			@tokenizer::source << line
-			begin
-				if line == '{'
-					treearray = block
-				elsif line != ''
-					treearray << statement
-				end
-			rescue Exception => error
-				puts error.to_s + (', at line %d' % (@tokenizer::lineno + 1))
-			ensure
-				@tokenizer::lineno+=1
-				@tokenizer::tok_start = @tokenizer::cur = 0
-				@sav = @node = nil #to clear the state for the next line
+#	def block
+#		raise '{ expected' unless @tokenizer::source[@tokenizer::lineno] == '{'
+#		@tokenizer::lineno+=1
+#		stmts = [ ]
+#		until @tokenizer::source[@tokenizer::lineno] == '}'
+#			stmts << read()
+#			@tokenizer::lineno+=1
+#		end
+#		@tokenizer::lineno+=1
+#		stmts
+#	end
+#	
+	def read(line) #Parses a line of text input and returns a parse tree
+		@tokenizer::source << line
+		begin #Catch-all error handling for syntax errors
+			if line == '{'
+				@blocklevel+=1
+				tree = block
+			elsif line == '}'
+				@blocklevel-=1
+			elsif line != ''
+				tree = statement
 			end
+		rescue Exception => error
+			puts error.to_s + (', at line %d' % (@tokenizer::lineno + 1))
+		ensure
+			@tokenizer::lineno+=1
+			@tokenizer::tok_start = @tokenizer::cur = 0
+			@sav = @node = nil #to clear the state for the next line
 		end
-		treearray
+		tree
 	end
 end
