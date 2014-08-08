@@ -9,9 +9,9 @@
 require '.\parser.rb'
 
 class Interpreter
-	@@actions = { }
+	@@actions = { } #Similarly to the parser, this stores the actions associated with each operator.  binop(), etc acts like symbol() in Parser
 
-	attr_accessor :parser
+	attr_accessor :parser, :vartab, :functab
 	def initialize
 		@parser = Parser.new
 		@vartab = { }
@@ -20,16 +20,18 @@ class Interpreter
 	end
 
 	def self.binop(name, type, &action) #takes a name, a type, and an action for a binary operation, and returns a proc that applies the operation to its inputs
-		@@actions[name] = Proc.new do |a, b|
+		@@actions[name] = lambda do |a, b|
 			if (a.is_a? Node) && (b.is_a? Node)
 				left = $i.lang_eval a
 				right = $i.lang_eval b #to handle nested expressions
+				left = left::left if left.is_a? Node
+				right = right::left if right.is_a? Node
 				if (left.is_a? type) && (right.is_a? type)
 					result = Parser.symtab['literal'].clone
 					result::left = action.call(left, right)
 					return result
 				else
-					raise '%s required for %s, at line %d' % type.to_s, name, ($i::parser::tokenizer::lineno+1)
+					raise '%s required for %s, at line %d' % type.to_s, name, ($i::parser::tokenizer::lineno+1) #doesn't work
 				end
 			else
 				raise 'Node expected, at line %d' % ($i::parser::tokenizer::lineno+1)
@@ -37,14 +39,52 @@ class Interpreter
 		end
 	end
 	
-	binop('+', Integer) do |a, b| return a + b end
-	binop('-', Integer) do |a, b| return a - b end
-	binop('*', Integer) do |a, b| return a * b end
-	binop('/', Integer) do |a, b| return a / b end
+	@@actions['='] = lambda do |a, b|
+		if (a.is_a? Node) && (b.is_a? Node)
+			if a::id != 'name' #get a variable name, if it isn't already there
+				a = $i.lang_eval a
+				raise 'Bad lvalue, at line %d' % ($i::parser::tokenizer::lineno+1) if a::id != 'name'
+			end
+			if b::id == 'literal'
+				$i::vartab[a::left] = b::left
+			elsif b::id == 'name'
+				raise '%s has no value' % b::left unless $i::vartab[b::left]
+				$i::vartab[a::left] = b::left
+			else
+				b = $i.lang_eval b
+				if b::id == 'literal'
+					$i::vartab[a::left] = b::left
+				elsif b::id == 'name'
+					raise '%s has no value' % b::left unless $i::vartab[b::left]
+					$i::vartab[a::left] = b::left
+				else
+					raise 'Bad rvalue, at line %d' % ($i::parser::tokenizer::lineno+1)
+				end
+			end
+		else
+			raise 'Node expected, at line %d' % ($i::parser::tokenizer::lineno+1)
+		end
+	end
+	
+	binop('+', Integer) do |a, b| a + b end
+	binop('-', Integer) do |a, b| a - b end
+	binop('*', Integer) do |a, b| a * b end
+	binop('/', Integer) do |a, b| (a / b).to_i end
+	binop('%', Integer) do |a, b| a % b end
+	binop('<'. Integer) do |a, b| (a < b) ? true : false end
+	binop('<='. Integer) do |a, b| (a <= b) ? true : false end
+	binop('!='. Integer) do |a, b| (a != b) ? true : false end
+	binop('=='. Integer) do |a, b| (a == b) ? true : false end
+	binop('>='. Integer) do |a, b| (a >= b) ? true : false end
+	binop('>'. Integer) do |a, b| (a > b) ? true : false end
 	
 	def lang_eval(node)  #Takes a node in the parse tree and evaluates it
+
 		case node::id
-			when '+' 
+			when '='
+				return @@actions['='].call(node::left, node::right) if (node::right)
+				raise 'Missing operand for =, at line %d' % (@parser::tokenizer::lineno+1)
+			when '+'
 				return @@actions['+'].call(node::left, node::right) if (node::right)
 				raise 'Missing operand for +, at line %d' % (@parser::tokenizer::lineno+1)
 			when '-'
@@ -55,6 +95,9 @@ class Interpreter
 				raise 'Missing operand for *, at line %d' % (@parser::tokenizer::lineno+1)
 			when '/'
 				return @@actions['/'].call(node::left, node::right) if (node::right)
+				raise 'Missing operand for /, at line %d' % (@parser::tokenizer::lineno+1)
+			when '<'
+				return @@actions['<'].call(node::left, node::right) if (node::right)
 				raise 'Missing operand for /, at line %d' % (@parser::tokenizer::lineno+1)
 			when 'name'
 				return @vartab[node::left] if @vartab[node::left]
@@ -69,29 +112,19 @@ class Interpreter
 end
 
 $i = Interpreter.new
-#$p = Parser.new
-#from_file = ($ARGV) ? 1 : 0
 
 lines = [ ]
-output = [ ]
-if $ARGV
-	for filename in $ARGV
-		if !(File.exists? filename)
-			puts '%s doesn\'t exist' % filename
-		else
-			if File.directory? filename
-				puts '%s is a folder' % filename
-			else
-				lines << ARGF.readlines
-			end
-		end
-	end
-	lines = lines.each do |line| line.chomp end
-	output = $i::parser.read lines
+parseoutput = [ ]
+lineno = 0
+unless ARGV.empty?
+	ARGF.each do |line| lines[lineno] = line.chomp; lineno+=1; end
+	lines.each do |line| parseoutput << ($i::parser.read line) end
+	parseoutput.each do |tree| puts $i.lang_eval tree; end
 else
-	until ((lines[0] = gets.chomp) == 'q')
-		output << ($i::parser.read lines[0])
+	puts 'Press q, then enter, to exit'
+	until ((lines[lineno] = gets.chomp) == 'q')
+		parseoutput << ($i::parser.read lines[lineno])
+		puts $i.lang_eval parseoutput[lineno]
+		lineno+=1
 	end
 end
-
-output.each do |tree| puts tree.to_s; puts $i.lang_eval(tree); end
