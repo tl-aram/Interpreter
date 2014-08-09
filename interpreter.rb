@@ -1,7 +1,7 @@
 # Interpreter for language
 # Operators: = + - (unary and n-ary) * / % & | ! (last 3 are logical) == != (inequality) < <= > >= ?:
 # Statements end with ;
-# While loop: var[code] means while(var){code}
+# While loop: var{code} means while(var){code}
 # Function definition: func name(args){code}
 # Function invocation: name(args)
 # Scope: local in functions, global
@@ -14,9 +14,8 @@ class Interpreter
 	attr_accessor :parser, :vartab, :functab
 	def initialize
 		@parser = Parser.new
-		@vartab = { }
-		@functab = { } #associates the name of a function with an array of trees corresponding to its statements
 		@currentnode = nil
+		@mainblock = Block.new
 	end
 
 	def self.binop(name, type, &action) #takes a name, a type, and an action for a binary operation, and returns a proc that applies the operation to its inputs
@@ -40,65 +39,75 @@ class Interpreter
 	end
 	
 	@@actions['='] = lambda do |a, b|
-		if (a.is_a? Node) && (b.is_a? Node)
-			if a::id != 'name' #get a variable name, if it isn't already there
-				a = $i.lang_eval a
-				raise 'Bad lvalue, at line %d' % ($i::parser::tokenizer::lineno+1) if a::id != 'name'
-			end
+		raise 'Node expected, at line %d' % ($i::parser::tokenizer::lineno+1) unless (a.is_a? Node) && (b.is_a? Node)
+		if a::id != 'name' #get a variable name, if it isn't already there
+			a = $i.lang_eval a
+			raise 'Bad lvalue, at line %d' % ($i::parser::tokenizer::lineno+1) if a::id != 'name'
+		end
+		if b::id == 'literal'
+			$i::vartab[a::left] = b::left
+		elsif b::id == 'name'
+			raise '%s has no value' % b::left unless $i::vartab[b::left]
+			$i::vartab[a::left] = b::left
+		else
+			b = $i.lang_eval b
 			if b::id == 'literal'
 				$i::vartab[a::left] = b::left
 			elsif b::id == 'name'
 				raise '%s has no value' % b::left unless $i::vartab[b::left]
 				$i::vartab[a::left] = b::left
 			else
-				b = $i.lang_eval b
-				if b::id == 'literal'
-					$i::vartab[a::left] = b::left
-				elsif b::id == 'name'
-					raise '%s has no value' % b::left unless $i::vartab[b::left]
-					$i::vartab[a::left] = b::left
-				else
-					raise 'Bad rvalue, at line %d' % ($i::parser::tokenizer::lineno+1)
-				end
+				raise 'Bad rvalue, at line %d' % ($i::parser::tokenizer::lineno+1)
 			end
-		else
-			raise 'Node expected, at line %d' % ($i::parser::tokenizer::lineno+1)
 		end
 	end
 	
+	@@actions['?'] = lambda do |a, b|
+		raise 'Node expected, at line %d' % ($i::parser::tokenizer::lineno+1) unless (a.is_a? Node and b.is_a? Node)
+		raise 'Improper ?: expression, at line %d' % ($i::parser::tokenizer::lineno+1) unless (b::id == ':' and b::left and b::right)
+		ifclause = lang_eval a
+		ifclause = ifclause::left if ifclause.is_a? Node
+		if ifclause
+			if b::left::id == 'literal'
+				return b::left
+			else
+				return lang_eval b::left
+			end
+		else
+			if b::right::id == 'literal'
+				return b::right
+			else
+				return lang_eval b::right
+			end
+		end
+	end
+	
+	binop('!', Object) do |a| a ? false : true end
+	binop('&', Object) do |a, b| (a && b) ? true : false end
+	binop('|', Object) do |a, b| (a || b) ? true : false end
+	binop('<', Integer) do |a, b| (a < b) ? true : false end
+	binop('<=', Integer) do |a, b| (a <= b) ? true : false end
+	binop('!=', Integer) do |a, b| (a != b) ? true : false end
+	binop('==', Integer) do |a, b| (a == b) ? true : false end
+	binop('>=', Integer) do |a, b| (a >= b) ? true : false end
+	binop('>', Integer) do |a, b| (a > b) ? true : false end
 	binop('+', Integer) do |a, b| a + b end
 	binop('-', Integer) do |a, b| a - b end
 	binop('*', Integer) do |a, b| a * b end
 	binop('/', Integer) do |a, b| (a / b).to_i end
 	binop('%', Integer) do |a, b| a % b end
-	binop('<'. Integer) do |a, b| (a < b) ? true : false end
-	binop('<='. Integer) do |a, b| (a <= b) ? true : false end
-	binop('!='. Integer) do |a, b| (a != b) ? true : false end
-	binop('=='. Integer) do |a, b| (a == b) ? true : false end
-	binop('>='. Integer) do |a, b| (a >= b) ? true : false end
-	binop('>'. Integer) do |a, b| (a > b) ? true : false end
+	
 	
 	def lang_eval(node)  #Takes a node in the parse tree and evaluates it
 
 		case node::id
-			when '='
-				return @@actions['='].call(node::left, node::right) if (node::right)
-				raise 'Missing operand for =, at line %d' % (@parser::tokenizer::lineno+1)
-			when '+'
-				return @@actions['+'].call(node::left, node::right) if (node::right)
-				raise 'Missing operand for +, at line %d' % (@parser::tokenizer::lineno+1)
-			when '-'
-				return @@actions['-'].call(node::left, node::right) if (node::right)
-				raise 'Missing operand for -, at line %d' % (@parser::tokenizer::lineno+1)
-			when '*'
-				return @@actions['*'].call(node::left, node::right) if (node::right)
-				raise 'Missing operand for *, at line %d' % (@parser::tokenizer::lineno+1)
-			when '/'
-				return @@actions['/'].call(node::left, node::right) if (node::right)
-				raise 'Missing operand for /, at line %d' % (@parser::tokenizer::lineno+1)
-			when '<'
-				return @@actions['<'].call(node::left, node::right) if (node::right)
-				raise 'Missing operand for /, at line %d' % (@parser::tokenizer::lineno+1)
+			when /^[=?!&|+\-*\/%]$/ #logic, math, ternary, and assignment operators
+				return @@actions[node::id].call(node::left, node::right) if (node::right)
+				raise 'Missing operand for %c, at line %d' % node::id, (@parser::tokenizer::lineno+1) unless node::id == '?'
+				raise 'Missing operand for ?:, at line %d' % (@parser::tokenizer::lineno+1)
+			when /[<!=>]=?/ #comparison operators
+				return @@actions[node::id].call(node::left, node::right) if (node::right)
+				raise 'Missing operand for %s, at line %d' % node::id, (@parser::tokenizer::lineno+1)
 			when 'name'
 				return @vartab[node::left] if @vartab[node::left]
 				raise '%s has no value, at line %d' % @vartab[node::left], (@parser::tokenizer::lineno+1)
@@ -111,7 +120,7 @@ class Interpreter
 	end
 end
 
-$i = Interpreter.new
+$i = Interpreter.new #later, make this a non-global variable
 
 lines = [ ]
 parseoutput = [ ]

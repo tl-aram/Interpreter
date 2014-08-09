@@ -3,6 +3,8 @@
 # Statements end with ;
 # While loop: var[code] means while(var){code}
 # Function definition: func name(args){code}
+# Both of these use block, which are collections of code together with local variables.
+# Blocks can be nested, and a block can access the variables of the blocks that contains it.
 # Function invocation: name(args)
 # Scope: local in functions, global
 
@@ -146,6 +148,13 @@ class Node #I actually forgot there was an existing Symbol class, and tried to c
 												)
 											 ]
 		end
+	end
+end
+
+class Block < Array #a series of parse trees, corresponding to statements, along with local variables and nested blocks
+	attr_accessor :vartab, :currentwhile, :functab #functab associates the name of a function with an array of trees corresponding to its statements
+	def block_eval
+		self.each do |tree| $i.lang_eval tree end
 	end
 end
 
