@@ -1,7 +1,7 @@
-# Lexer/parser for language DEBUGGING REQUIRED
+,# Lexer/parser for language DEBUGGING REQUIRED
 # Operators: = + - (unary and n-ary) * / % & | ! (last 3 are logical) == != (inequality) < <= > >= ?:
 # Statements end with ;
-# While loop: var[code] means while(var){code}
+# While loop: has form while(var){code}
 # Function definition: func name(args){code}
 # Both of these use block, which are collections of code together with local variables.
 # Blocks can be nested, and a block can access the variables of the blocks that contains it.
@@ -36,9 +36,13 @@ class Lexer
 		end
 		@tok_start = @cur
 		if (@source[@lineno][@cur]) =~ /[A-Za-z_]/
-			if @source[@lineno][@cur, 4] == 'func' #So far our only reserved word
+			if @source[@lineno][@cur, 4] == 'func'
 				@cur+=4
 				t::type = t::value = 'func'
+				return t
+			elsif @source[@lineno][@cur, 5] == 'while'
+				@cur+=5
+				t::type = t::value = 'while'
 				return t
 			end
 			@cur+=1
@@ -61,9 +65,9 @@ class Lexer
 		def compsym(sym) # A proc, no, method, just to make the code shorter
 			if @source[@lineno][@cur.next] == '='
 				@cur+=1
-				return sym + '='
+				sym + '='
 			else
-				return sym
+				sym
 			end
 		end
 		case @source[@lineno][@cur] #maybe find better way to write this
@@ -152,9 +156,27 @@ class Node #I actually forgot there was an existing Symbol class, and tried to c
 end
 
 class Block < Array #a series of parse trees, corresponding to statements, along with local variables and nested blocks
-	attr_accessor :vartab, :currentwhile, :functab #functab associates the name of a function with an array of trees corresponding to its statements
+	attr_accessor :expr, :type, :vartab, :functab, :parentblock #functab associates the name of a function with an array of trees corresponding to its statements
+	
+	Whileblock = 0
+	Funcblock = 1 #values for @type
+	def initialize(parent, expr, type)
+		super()
+		@type = type
+		@vartab = { }
+		@functab = { }
+		@parentblock = parent
+		@expr = expr #holds either the condition, for 'while', or the parameter list, for 'func'
+	end
+	
 	def block_eval
-		self.each do |tree| $i.lang_eval tree end
+		self.each do |tree|
+			if tree.is_a? Node
+				$i.lang_eval tree
+			elsif tree.is_a? Block #just 'while' for now
+				
+			end
+		end
 	end
 end
 
@@ -238,6 +260,7 @@ class Parser
 		node
 	end
 	symbol(')')
+	infix(',')
 	infixr('=', 10) do |node, left|
 		raise 'Left side of \'=\' not an lvalue' if left::id != 'name'
 		node::left = left
@@ -323,6 +346,9 @@ class Parser
 			when 'func'
 				nextnode = @@symtab['func'].clone
 				nextnode::left = @token::value
+			when 'while'
+				nextnode = @@symtab['while'].clone
+				nextnode::left = @token::value
 			when 'end'
 				nextnode = @@symtab['end'].clone
 		end
@@ -355,27 +381,20 @@ class Parser
 		expect ';'
 		tree
 	end
-	
-#	def block
-#		raise '{ expected' unless @tokenizer::source[@tokenizer::lineno] == '{'
-#		@tokenizer::lineno+=1
-#		stmts = [ ]
-#		until @tokenizer::source[@tokenizer::lineno] == '}'
-#			stmts << read()
-#			@tokenizer::lineno+=1
-#		end
-#		@tokenizer::lineno+=1
-#		stmts
-#	end
-#	
-	def read(line) #Parses a line of text input and returns a parse tree
+
+	def read(line) #Parses a line of text input and returns a parse tree, or handles block creation
 		@tokenizer::source << line
 		begin #Catch-all error handling for syntax errors
-			if line == '{'
+			if line =~ /^\s*while/
+				expect
+				expect '('
+				cond = @node::nud.call(@node)
+				expect '{'
 				@blocklevel+=1
-				tree = block
+				tree = Block.new($i::currentblock, cond, Whileblock)
 			elsif line == '}'
 				@blocklevel-=1
+				tree = nil #this is so, when the interpreter checks if the return type is Block, it only works if a block is beginning
 			elsif line != ''
 				tree = statement
 			end

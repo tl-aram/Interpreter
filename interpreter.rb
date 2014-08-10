@@ -11,11 +11,12 @@ require '.\parser.rb'
 class Interpreter
 	@@actions = { } #Similarly to the parser, this stores the actions associated with each operator.  binop(), etc acts like symbol() in Parser
 
-	attr_accessor :parser, :vartab, :functab
+	attr_accessor :parser, :mainblock, :currentblock
 	def initialize
 		@parser = Parser.new
 		@currentnode = nil
-		@mainblock = Block.new
+		@mainblock = Block.new #the block in which all execution happens, and the one that has the global variables
+		@currentblock = @mainblock
 	end
 
 	def self.binop(name, type, &action) #takes a name, a type, and an action for a binary operation, and returns a proc that applies the operation to its inputs
@@ -99,7 +100,6 @@ class Interpreter
 	
 	
 	def lang_eval(node)  #Takes a node in the parse tree and evaluates it
-
 		case node::id
 			when /^[=?!&|+\-*\/%]$/ #logic, math, ternary, and assignment operators
 				return @@actions[node::id].call(node::left, node::right) if (node::right)
@@ -123,17 +123,49 @@ end
 $i = Interpreter.new #later, make this a non-global variable
 
 lines = [ ]
-parseoutput = [ ]
 lineno = 0
 unless ARGV.empty?
 	ARGF.each do |line| lines[lineno] = line.chomp; lineno+=1; end
-	lines.each do |line| parseoutput << ($i::parser.read line) end
-	parseoutput.each do |tree| puts $i.lang_eval tree; end
+	lines.each do |line|
+		tree = $i::parser.read line
+		$i::currentblock << tree
+		if tree.is_a? Node
+			puts $i.lang_eval $i::currentblock.last
+		elsif tree.is_a? Block
+			$i::currentblock = tree #switch to new block is done here, not in read(), since I don't know whether a ref is being copied
+		elsif !tree
+			if $i::currentblock::type == Whileblock
+				test = $i::lang_eval $i::currentblock::expr
+				while test::left
+					$i::currentblock.block_eval
+					test = $i::lang_eval $i::currentblock::expr
+				end
+			elsif $i::currentblock::type == Funcblock
+				
+			end
+			$i::currentblock = $i::currentblock::parentblock #when a block ends, this returns interpreter to its parent
+		end
+	end
 else
 	puts 'Press q, then enter, to exit'
 	until ((lines[lineno] = gets.chomp) == 'q')
-		parseoutput << ($i::parser.read lines[lineno])
-		puts $i.lang_eval parseoutput[lineno]
-		lineno+=1
+		tree = ($i::parser.read lines[lineno])
+		$i::currentblock << tree
+		if tree.is_a? Node
+			puts $i.lang_eval $i::currentblock.last
+		elsif tree.is_a? Block
+			$i::currentblock = tree #switch to new block is done here, not in read(), since I don't know whether a ref is being copied
+		elsif !tree
+			if $i::currentblock::type == Whileblock
+				test = $i::lang_eval $i::currentblock::expr
+				while test::left
+					$i::currentblock.block_eval
+					test = $i::lang_eval $i::currentblock::expr
+				end
+			elsif $i::currentblock::type == Funcblock
+				
+			end
+			$i::currentblock = $i::currentblock::parentblock #when a block ends, this returns interpreter to its parent
+		end
 	end
 end
