@@ -15,7 +15,7 @@ class Interpreter
 	def initialize
 		@parser = Parser.new
 		@currentnode = nil
-		@mainblock = Block.new #the block in which all execution happens, and the one that has the global variables
+		@mainblock = Block.new(nil, nil, nil) #the block in which all execution happens, and the one that has the global variables
 		@currentblock = @mainblock
 	end
 
@@ -46,17 +46,17 @@ class Interpreter
 			raise 'Bad lvalue, at line %d' % ($i::parser::tokenizer::lineno+1) if a::id != 'name'
 		end
 		if b::id == 'literal'
-			$i::vartab[a::left] = b::left
+			$i::currentblock::vartab[a::left] = b::left
 		elsif b::id == 'name'
-			raise '%s has no value' % b::left unless $i::vartab[b::left]
-			$i::vartab[a::left] = b::left
+			raise '%s has no value' % b::left unless $i::currentblock::vartab[b::left]
+			$i::currentblock::vartab[a::left] = b::left
 		else
 			b = $i.lang_eval b
 			if b::id == 'literal'
-				$i::vartab[a::left] = b::left
+				$i::currentblock::vartab[a::left] = b::left
 			elsif b::id == 'name'
-				raise '%s has no value' % b::left unless $i::vartab[b::left]
-				$i::vartab[a::left] = b::left
+				raise '%s has no value' % b::left unless $i::currentblock::vartab[b::left]
+				$i::currentblock::vartab[a::left] = b::left
 			else
 				raise 'Bad rvalue, at line %d' % ($i::parser::tokenizer::lineno+1)
 			end
@@ -109,8 +109,8 @@ class Interpreter
 				return @@actions[node::id].call(node::left, node::right) if (node::right)
 				raise 'Missing operand for %s, at line %d' % node::id, (@parser::tokenizer::lineno+1)
 			when 'name'
-				return @vartab[node::left] if @vartab[node::left]
-				raise '%s has no value, at line %d' % @vartab[node::left], (@parser::tokenizer::lineno+1)
+				return @currentblock::vartab[node::left] if @currentblock::vartab[node::left]
+				raise '%s has no value, at line %d' % node::left, (@parser::tokenizer::lineno+1)
 			when 'literal'
 				return node::left if node::left
 				raise 'Value doesn\'t exist, at line %d' %  (@parser::tokenizer::lineno+1)
@@ -141,7 +141,7 @@ unless ARGV.empty?
 					test = $i::lang_eval $i::currentblock::expr
 				end
 			elsif $i::currentblock::type == Funcblock
-				
+				$i::currentblock::parentblock::functab[$i::currentblock::name] = $i::currentblock	
 			end
 			$i::currentblock = $i::currentblock::parentblock #when a block ends, this returns interpreter to its parent
 		end
@@ -152,10 +152,12 @@ else
 		tree = ($i::parser.read lines[lineno])
 		$i::currentblock << tree
 		if tree.is_a? Node
-			puts $i.lang_eval $i::currentblock.last
+			unless ($i::currentblock::type == Whileblock) or ($i::currentblock::type) #when defining function or while loop, don't immediately run
+				puts $i.lang_eval $i::currentblock.last
+			end
 		elsif tree.is_a? Block
 			$i::currentblock = tree #switch to new block is done here, not in read(), since I don't know whether a ref is being copied
-		elsif !tree
+		elsif tree == 'end'
 			if $i::currentblock::type == Whileblock
 				test = $i::lang_eval $i::currentblock::expr
 				while test::left
@@ -163,7 +165,7 @@ else
 					test = $i::lang_eval $i::currentblock::expr
 				end
 			elsif $i::currentblock::type == Funcblock
-				
+				$i::currentblock::parentblock::functab[$i::currentblock::name] = $i::currentblock
 			end
 			$i::currentblock = $i::currentblock::parentblock #when a block ends, this returns interpreter to its parent
 		end

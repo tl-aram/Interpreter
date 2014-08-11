@@ -1,4 +1,4 @@
-,# Lexer/parser for language DEBUGGING REQUIRED
+# Lexer/parser for language DEBUGGING REQUIRED
 # Operators: = + - (unary and n-ary) * / % & | ! (last 3 are logical) == != (inequality) < <= > >= ?:
 # Statements end with ;
 # While loop: has form while(var){code}
@@ -155,18 +155,18 @@ class Node #I actually forgot there was an existing Symbol class, and tried to c
 	end
 end
 
+Whileblock = 0
+Funcblock = 1 #values for @type
 class Block < Array #a series of parse trees, corresponding to statements, along with local variables and nested blocks
-	attr_accessor :expr, :type, :vartab, :functab, :parentblock #functab associates the name of a function with an array of trees corresponding to its statements
-	
-	Whileblock = 0
-	Funcblock = 1 #values for @type
-	def initialize(parent, expr, type)
+	attr_accessor :expr, :type, :name, :vartab, :functab, :parentblock #functab associates the name of a function with an array of trees corresponding to its statements	
+	def initialize(parent, expr, type, name=nil)
 		super()
 		@type = type
 		@vartab = { }
 		@functab = { }
 		@parentblock = parent
 		@expr = expr #holds either the condition, for 'while', or the parameter list, for 'func'
+		@name = name #for a function
 	end
 	
 	def block_eval
@@ -186,7 +186,7 @@ class Parser
 			@@symtab
 	end
 
-	attr_accessor :node, :sav #done to get parentheses working.  Fix later
+	attr_accessor :node, :sav, :tokenizer #done to get parentheses working.  Fix later
 	def initialize
 		@tokenizer = Lexer.new # why the defined method is initialize and the called method is new mystifies me
 		@token = nil
@@ -229,8 +229,8 @@ class Parser
 				node::right = $i::parser.expression bp
 				node
 			end
+			sym
 		end
-		sym
 	end
 	
 	def self.infixr(id, bp=0, &led)
@@ -278,12 +278,12 @@ class Parser
 	infix(':', 20)
 	infixr('&', 30)
 	infixr('|', 30)
+	infix('>', 40)
 	infix('<', 40)
 	infix('<=', 40)
 	infix('==', 40)
 	infix('!=', 40)
 	infix('>=', 40)
-	infix('>', 40)
 	infix('+', 50)
 	infix('-', 50)
 	infix('*', 60)
@@ -302,6 +302,19 @@ class Parser
 	end
 	symbol('name')::nud = Proc.new do |node|
 		node
+	end
+	prefix('while')::nud = Proc.new do |node|
+		$i::parser.expect '('
+		$i::parser::sav = $i::parser::node
+		$i::parser::expect
+		cond = $i::parser::sav::nud.call($i::parser::sav)
+		cond
+	end
+	prefix('func')::nud = Proc.new do |node|
+		name = $i::parser::expect 'name'
+		$i::parser.expect '('
+		args = $i::parser::node::nud.call($i::parser::node)
+		[name, args]
 	end
 	symbol('end')::nud = Proc.new do |node|
 		node
@@ -329,38 +342,39 @@ class Parser
 				expect
 				raise SyntaxError, "%s expected, but %s received instead" % [expected, (@node ? ("symbol " + @node.id) : "nothing")] if @node::id != expected
 			end
-		end
-		@token = @tokenizer.get_token
-		case @token::type
-			when 'operator'
-				nextnode = @@symtab[@token::value].clone #probably not the best way to do, maybe use metaprogramming
-			when 'number'
-				nextnode = @@symtab['literal'].clone
-				nextnode::left = @token::value.to_i
-			when 'string'
-				nextnode = @@symtab['literal'].clone
-				nextnode::left = @token::value
-			when 'name'
-				nextnode = @@symtab['name'].clone
-				nextnode::left = @token::value
-			when 'func'
-				nextnode = @@symtab['func'].clone
-				nextnode::left = @token::value
-			when 'while'
-				nextnode = @@symtab['while'].clone
-				nextnode::left = @token::value
-			when 'end'
-				nextnode = @@symtab['end'].clone
-		end
-#		if @sav == @node #When we need to get a new token/node, which is most of the time
-			@node = nextnode
-#		end
-#		if expected	#caused trouble with the ';'
-#			if nextnode::id != expected
-#				raise SyntaxError, "%s expected, but %s received instead" % [expected, (nextnode ? ("symbol " + nextnode.id) : "nothing")]
+		else
+			@token = @tokenizer.get_token
+			case @token::type
+				when 'operator'
+					nextnode = @@symtab[@token::value].clone #probably not the best way to do, maybe use metaprogramming
+				when 'number'
+					nextnode = @@symtab['literal'].clone
+					nextnode::left = @token::value.to_i
+				when 'string'
+					nextnode = @@symtab['literal'].clone
+					nextnode::left = @token::value
+				when 'name'
+					nextnode = @@symtab['name'].clone
+					nextnode::left = @token::value
+				when 'func'
+					nextnode = @@symtab['func'].clone
+					nextnode::left = @token::value
+				when 'while'
+					nextnode = @@symtab['while'].clone
+					nextnode::left = @token::value
+				when 'end'
+					nextnode = @@symtab['end'].clone
+			end
+#			if @sav == @node #When we need to get a new token/node, which is most of the time
+				@node = nextnode
 #			end
-#		end
-		@node #Either we have a new node, or will just use the existing one
+#			if expected	#caused trouble with the ';'
+#				if nextnode::id != expected
+#					raise SyntaxError, "%s expected, but %s received instead" % [expected, (nextnode ? ("symbol " + nextnode.id) : "nothing")]
+#				end
+#			end
+			@node #Either we have a new node, or will just use the existing one
+		end
 	end
 	
 	def expression(rbp)
@@ -387,14 +401,19 @@ class Parser
 		begin #Catch-all error handling for syntax errors
 			if line =~ /^\s*while/
 				expect
-				expect '('
 				cond = @node::nud.call(@node)
 				expect '{'
 				@blocklevel+=1
 				tree = Block.new($i::currentblock, cond, Whileblock)
+			elsif line =~ /^\s*func/
+				expect #'func' token
+				nameandargs = @node::nud.call(@node)
+				expect '{'
+				@blocklevel+=1
+				tree = Block.new($i::currentblock, nameandargs[1], Funcblock, nameandargs[0])
 			elsif line == '}'
 				@blocklevel-=1
-				tree = nil #this is so, when the interpreter checks if the return type is Block, it only works if a block is beginning
+				tree = 'end' #this is so, when the interpreter checks if the return type is Block, it only works if a block is beginning
 			elsif line != ''
 				tree = statement
 			end
