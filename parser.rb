@@ -101,7 +101,7 @@ class Lexer
 						@cur+=1
 					end
 					if @source[@lineno][@cur].nil? # maybe use better end-of-input handling?
-						raise "End of string (') expected at line %d" % (@lineno + 1)
+						raise 'End of string (\') expected'
 					end
 				end
 				t::type = 'string'
@@ -170,13 +170,35 @@ class Block < Array #a series of parse trees, corresponding to statements, along
 	end
 	
 	def block_eval
-		self.each do |tree|
-			if tree.is_a? Node
-				$i.lang_eval tree
-			elsif tree.is_a? Block #just 'while' for now
-				
+		if @type == Whileblock
+			test = $i.stmt_eval @expr
+			while test::left
+				self.each do |tree|
+					if tree.is_a? Node
+						result = $i.stmt_eval tree
+						puts result if $live
+					elsif tree.is_a? Block and tree::type == Whileblock
+						$i.block_eval tree
+					end
+				end
+				test = $i.stmt_eval @expr
 			end
+		elsif @type == Funcblock
+			
 		end
+	end
+	
+	def to_s
+		if @type == Whileblock
+			puts 'While block, with condition:'
+		elsif @type == Funcblock
+			puts 'Function block, for %s, with parameters:' % @name
+		end
+		puts @expr.to_s
+		print 'Variables: %s' % @vartab.to_s unless @vartab.empty?
+		print 'Functions: %s' % @functab.to_s unless @functab.empty?
+		print 'Code: '
+		super
 	end
 end
 
@@ -259,6 +281,13 @@ class Parser
 		$i::parser.expect ')'
 		node
 	end
+	infix('(', 80) do |node, left| #for function calls
+		raise 'Function called with bad name' if left::id != 'name'
+		node::left = left
+		node::right = $i::parser::expression 0
+		$i::parser.expect ')'
+		node
+	end
 	symbol(')')
 	infix(',')
 	infixr('=', 10) do |node, left|
@@ -319,22 +348,6 @@ class Parser
 	symbol('end')::nud = Proc.new do |node|
 		node
 	end
-	
-	# def accept
-		# if @sav == @node #When we need to get a new token, which is most of the time
-			# tok = @tokenizer.get_token
-			# case tok::type
-				# when 'operator'
-					# @node = @@symtab[tok::value].clone #probably not the best way to do, maybe use metaprogramming
-				# when 'number'
-					# @node = @@symtab['literal'].clone
-					# @node::left = tok::value
-				# when 'end'
-					# @node = @@symtab['end'].clone
-			# end
-			# @token = tok #not seeing much use for ext. token var
-		# end
-	# end
 	
 	def expect(expected=nil)
 		if expected
@@ -418,7 +431,7 @@ class Parser
 				tree = statement
 			end
 		rescue Exception => error
-			puts error.to_s + (', at line %d' % (@tokenizer::lineno + 1))
+			puts error.to_s + (', at line %d' % @tokenizer::lineno)
 		ensure
 			@tokenizer::lineno+=1
 			@tokenizer::tok_start = @tokenizer::cur = 0
