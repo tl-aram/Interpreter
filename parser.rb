@@ -165,7 +165,15 @@ class Block < Array #a series of parse trees, corresponding to statements, along
 		@vartab = { }
 		@functab = { }
 		@parentblock = parent
-		@expr = expr #holds either the condition, for 'while', or the parameter list, for 'func'
+		if @type == Whileblock
+			@expr = expr #holds either the condition, for 'while', or the parameter list, for 'func'
+		elsif @type == Funcblock
+			if expr::id == 'name' #one argument
+				@expr = expr
+			else
+				@expr = $i::stmt_eval expr
+			end
+		end
 		@name = name #for a function
 	end
 	
@@ -183,8 +191,15 @@ class Block < Array #a series of parse trees, corresponding to statements, along
 				end
 				test = $i.stmt_eval @expr
 			end
-		elsif @type == Funcblock
-			
+		elsif @type == Funcblock #variables have already been assigned
+			self.each do |tree|
+				if tree.is_a? Node
+					result = $i.stmt_eval tree
+					puts result if $live
+				elsif tree.is_a? Block and tree::type == Whileblock #for now, nested function defs are ignored
+					$i.block_eval tree
+				end
+			end
 		end
 	end
 	
@@ -198,7 +213,7 @@ class Block < Array #a series of parse trees, corresponding to statements, along
 		print 'Variables: %s' % @vartab.to_s unless @vartab.empty?
 		print 'Functions: %s' % @functab.to_s unless @functab.empty?
 		print 'Code: '
-		super
+		self.each do |tree| puts tree.to_s end
 	end
 end
 
@@ -289,7 +304,7 @@ class Parser
 		node
 	end
 	symbol(')')
-	infix(',')
+	infix(',', 5)
 	infixr('=', 10) do |node, left|
 		raise 'Left side of \'=\' not an lvalue' if left::id != 'name'
 		node::left = left
@@ -353,6 +368,7 @@ class Parser
 		if expected
 			if @node::id != expected #doesn't actually get new token properly.  Fix later
 				expect
+				return @node
 				raise SyntaxError, "%s expected, but %s received instead" % [expected, (@node ? ("symbol " + @node.id) : "nothing")] if @node::id != expected
 			end
 		else

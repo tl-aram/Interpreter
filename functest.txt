@@ -1,0 +1,4 @@
+func test(args) {
+	1;
+}
+test(43);
